@@ -215,7 +215,7 @@ def main(args):
                 val_auc = roc_auc_score(val_labels, val_preds)
             except Exception:
                 val_auc = float('nan')
-            print('val_preds:', val_preds)
+            print('val_preds_head:', val_preds[:16])
             val_acc = accuracy_score(val_labels, (np.array(val_preds) >= 0.5).astype(int))
 
             # Capture the LR used during this epoch before stepping the scheduler

@@ -9,7 +9,8 @@ class Encoder(nn.Module):
             d_model=d_model,
             nhead=nhead,
             dim_feedforward=dim_feedforward,
-            dropout=dropout
+            dropout=dropout,
+            batch_first=True,
         )
         self.transformer_encoder = nn.TransformerEncoder(
             encoder_layer=encoder_layer,
@@ -17,4 +18,5 @@ class Encoder(nn.Module):
         )
 
     def forward(self, x: torch.Tensor, src_key_padding_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        # Expect input as [B, S, E] due to batch_first=True
         return self.transformer_encoder(x, src_key_padding_mask=src_key_padding_mask)
