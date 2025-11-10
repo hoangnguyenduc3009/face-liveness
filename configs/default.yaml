@@ -1,0 +1,59 @@
+# Paths
+project_name: face-liveness-transformer
+seed: 42
+work_dir: .
+output_dir: checkpoints
+log_dir: logs
+
+data:
+  root: data/CelebA_Spoof  # dataset root used to resolve relative paths in label files
+  train_list: data/CelebA_Spoof/metas/intra_test/train_label.txt
+  val_list: data/CelebA_Spoof/metas/intra_test/test_label.txt
+  test_list: data/CelebA_Spoof/metas/intra_test/test_label.txt
+  num_workers: 8
+  pin_memory: true
+  persistent_workers: true
+
+model:
+  # Custom lightweight ViT for liveness (implemented in `src/models/vit_liveness.py`)
+  name: liveness_vit
+  image_size: 224
+  patch_size: 16
+  d_model: 128
+  nhead: 4
+  num_layers: 2
+  num_classes: 2
+  # The following keys are kept for potential future integration with larger timm models
+  pretrained: false
+  drop_rate: 0.0
+  drop_path_rate: 0.1
+  freeze_backbone: false
+
+train:
+  batch_size: 64
+  epochs: 30
+  lr: 3.0e-4
+  weight_decay: 0.05
+  betas: [0.9, 0.999]
+  warmup_epochs: 5
+  max_grad_norm: 1.0
+  amp: true
+  # Class order is [0=live, 1=spoof].
+  # Weights roughly inverse-frequency to mitigate imbalance (live minority).
+  # Tune as needed (e.g., [2.0, 1.0] for stronger emphasis on live).
+  class_weights: [1.5, 0.75]
+
+augment:
+  random_resized_crop_scale: [0.8, 1.0]
+  color_jitter: [0.1, 0.1, 0.1, 0.05]  # brightness, contrast, saturation, hue (reduced early regularization)
+  random_grayscale_p: 0.0
+  gaussian_blur_p: 0.0
+  horizontal_flip_p: 0.5
+
+eval:
+  batch_size: 128
+
+save:
+  save_top_k: 1
+  monitor: auc
+  mode: max
