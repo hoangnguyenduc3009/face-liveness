@@ -99,7 +99,7 @@ def load_model():
     model.load_state_dict(checkpoint['model'])
     model.eval()
     
-    threshold = checkpoint.get('threshold', 0.1)
+    threshold = 0.09
     
     return model, threshold
 

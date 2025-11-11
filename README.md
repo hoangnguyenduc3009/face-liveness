@@ -8,6 +8,17 @@ It is built on a **Transformer encoder-decoder architecture**, enabling strong t
 The model processes video clips or frame sequences and predicts whether a face is **live** or **spoofed**.  
 It leverages a Transformer encoder to learn spatio-temporal embeddings and a decoder/classification head to output binary logits (`live` / `spoof`).
 
+## Results
+
+<img src="result_spoof2.png" alt="Spoof Detection Result 2" style="max-height: 400px;">
+
+<img src="result_live.png" alt="Live Detection Result" style="max-height: 400px;">
+
+<img src="result_spoof1.png" alt="Spoof Detection Result 1" style="max-height: 400px;">
+
+## Links
+- 🚀 **Demo**: [https://huggingface.co/spaces/hoangnguyenduc3009/face-liveness-vit](https://huggingface.co/spaces/hoangnguyenduc3009/face-liveness-vit)
+- 🤗 **Model on Hugging Face**: [https://huggingface.co/hoangnguyenduc3009/face-liveness-vit](https://huggingface.co/hoangnguyenduc3009/face-liveness-vit)
 
 ## Setup
 ```bash
@@ -33,3 +44,5 @@ Logs & checkpoints will appear in `logs/` and `checkpoints/` (auto-created).
 ```bash
 python evaluate.py --config configs/default.yaml --checkpoint checkpoints/best.pt
 ```
+
+````
