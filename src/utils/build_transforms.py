@@ -23,7 +23,8 @@ def build_transforms(cfg: Dict) -> Dict[str, T.Compose]:
         T.RandomResizedCrop(size, scale=tuple(aug.get('random_resized_crop_scale', [0.8, 1.0]))),
         T.RandomHorizontalFlip(p=aug.get('horizontal_flip_p', 0.5)),
         T.ColorJitter(*aug.get('color_jitter', [0.2, 0.2, 0.2, 0.1])),
-        T.RandomGrayscale(p=aug.get('random_grayscale_p', 0.05)),
+        # Convert to grayscale (keep 3 channels) for both train and val
+        T.Grayscale(num_output_channels=3),
     ]
     if blur_tf:
         train_list.append(blur_tf)
@@ -36,6 +37,8 @@ def build_transforms(cfg: Dict) -> Dict[str, T.Compose]:
     val_tfms = T.Compose([
         T.Resize(int(size * 1.14)),
         T.CenterCrop(size),
+        # Ensure validation images are also grayscaled (keeps 3 channels)
+        T.Grayscale(num_output_channels=3),
         T.ToTensor(),
         T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])

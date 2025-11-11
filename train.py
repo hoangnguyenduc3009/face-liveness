@@ -3,6 +3,7 @@ import argparse
 import random
 
 import numpy as np
+from datetime import datetime
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -13,12 +14,10 @@ from tqdm import tqdm
 from src.utils.config import load_yaml_config, TrainConfig, ensure_dirs
 from src.datasets.celeba_spoof import CelebaSpoofDataset
 from src.models.vit_liveness import LivenessViT
+from src.training.find_threshold import find_best_threshold
 
 from src.utils.build_transforms import build_transforms
-try:
-    import wandb  # type: ignore
-except ImportError:  # wandb is optional; training can proceed without it
-    wandb = None
+import wandb
 
 def worker_init_fn(worker_id: int):
     """Picklable worker init for DataLoader.
@@ -47,6 +46,8 @@ def main(args):
     out_dir = os.path.join(work_dir, cfg.get('output_dir', 'checkpoints'))
     log_dir = os.path.join(work_dir, cfg.get('log_dir', 'logs'))
     ensure_dirs(out_dir, log_dir)
+    # Create a timestamp for this run so saved checkpoints are unique per run
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # Device selection with MPS fallback (Apple Silicon) then CPU
     if torch.cuda.is_available():
@@ -138,8 +139,10 @@ def main(args):
     scaler = torch.amp.GradScaler('cuda', enabled=(train_cfg.amp and torch.cuda.is_available()))
 
     best_auc = -1.0
-    best_path = os.path.join(out_dir, 'best.pt')
-    last_path = os.path.join(out_dir, 'last.pt')
+    best_threshold = 0.5
+    # Use timestamped filenames so each run's checkpoints are unique
+    best_path = os.path.join(out_dir, f'best_{timestamp}.pt')
+    last_path = os.path.join(out_dir, f'last_{timestamp}.pt')
 
     # Initialize Weights & Biases only if a key is provided (explicit opt-in)
     wandb_run = None
@@ -147,7 +150,9 @@ def main(args):
         try:
             wandb.login(key=args.wandb_key)
             project_name = getattr(args, 'wandb_project', None) or cfg.get('project_name', 'face-liveness-transformer')
-            wandb_run = wandb.init(project=project_name, config=args.__dict__)
+            # include timestamp in run name for easy identification
+            run_name = f"{project_name}_{timestamp}"
+            wandb_run = wandb.init(project=project_name, name=run_name, config=args.__dict__)
             wandb.watch(model, log='gradients', log_freq=100)
         except Exception as e:
             print(f"WandB init failed: {e}. Proceeding without WandB.")
@@ -188,10 +193,12 @@ def main(args):
             train_loss = running_loss / len(train_ds)
             try:
                 train_auc = roc_auc_score(all_labels, all_preds)
+                train_thresh, _ = find_best_threshold(all_labels, all_preds)
             except Exception:
                 train_auc = float('nan')
+                train_thresh = 0.5
             # Compute training accuracy from thresholded probabilities
-            train_acc = accuracy_score(all_labels, (np.array(all_preds) >= 0.5).astype(int))
+            train_acc = accuracy_score(all_labels, (np.array(all_preds) >= train_thresh).astype(int))
             train_pos_mean = float(np.mean(batch_pos_means)) if batch_pos_means else float('nan')
 
             # Validation
@@ -213,10 +220,12 @@ def main(args):
             val_loss = val_loss_accum / len(val_ds)
             try:
                 val_auc = roc_auc_score(val_labels, val_preds)
+                best_threshold, _ = find_best_threshold(val_labels, val_preds)
             except Exception:
                 val_auc = float('nan')
+                best_threshold = 0.5
             print('val_preds_head:', val_preds[:16])
-            val_acc = accuracy_score(val_labels, (np.array(val_preds) >= 0.5).astype(int))
+            val_acc = accuracy_score(val_labels, (np.array(val_preds) >= best_threshold).astype(int))
 
             # Capture the LR used during this epoch before stepping the scheduler
             current_lr = optimizer.param_groups[0]['lr']
@@ -226,6 +235,7 @@ def main(args):
                 f"Epoch {epoch+1}: lr={current_lr:.6f} "
                 f"train_loss={train_loss:.4f} train_auc={train_auc:.4f} train_acc={train_acc:.4f} train_pos_mean={train_pos_mean:.4f} "
                 f"val_loss={val_loss:.4f} val_auc={val_auc:.4f} val_acc={val_acc:.4f} val_pos_mean={val_pos_mean:.4f}"
+                f" best_thresh={best_threshold:.4f}"
             )
             print(log_line)
             if wandb_run is not None:
@@ -240,19 +250,39 @@ def main(args):
                     'val/auc': val_auc,
                     'val/acc': val_acc,
                         'val/pos_mean': val_pos_mean,
+                        'val/best_threshold': best_threshold,
                 }, step=epoch + 1)
 
             # Save last checkpoint
             torch.save({'model': model.state_dict(), 'cfg': cfg}, last_path)
+            if wandb_run is not None:
+                try:
+                    art_last = wandb.Artifact(name=f"model_last_{timestamp}", type="model")
+                    art_last.add_file(last_path)
+                    wandb_run.log_artifact(art_last)
+                    # Save a lightweight reference in the run summary
+                    wandb_run.summary['last_checkpoint'] = os.path.basename(last_path)
+                except Exception as e:
+                    print(f"Failed to log last checkpoint to WandB: {e}")
 
             # Save best by AUC
             if val_auc == val_auc and val_auc > best_auc:  # NaN-safe comparison
                 best_auc = val_auc
-                torch.save({'model': model.state_dict(), 'cfg': cfg}, best_path)
+                torch.save({'model': model.state_dict(), 'cfg': cfg, 'threshold': best_threshold}, best_path)
                 print(f"Saved best checkpoint to {best_path} (AUC={best_auc:.4f})")
                 if wandb_run is not None:
-                    wandb_run.summary['best_auc'] = best_auc
-                    wandb_run.summary['best_epoch'] = epoch + 1
+                    try:
+                        art_best = wandb.Artifact(name=f"model_best_{timestamp}", type="model")
+                        art_best.add_file(best_path)
+                        # attach a little metadata about why this is best
+                        art_best.metadata = {'best_auc': best_auc, 'epoch': epoch + 1, 'timestamp': timestamp, 'threshold': best_threshold}
+                        wandb_run.log_artifact(art_best)
+                        wandb_run.summary['best_checkpoint'] = os.path.basename(best_path)
+                        wandb_run.summary['best_auc'] = best_auc
+                        wandb_run.summary['best_epoch'] = epoch + 1
+                        wandb_run.summary['best_threshold'] = best_threshold
+                    except Exception as e:
+                        print(f"Failed to log best checkpoint to WandB: {e}")
     finally:
         if wandb_run is not None:
             # Prefer global finish to ensure proper closure even if run object changes
