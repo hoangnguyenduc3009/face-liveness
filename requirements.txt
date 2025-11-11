@@ -11,3 +11,5 @@ matplotlib
 seaborn
 gdown
 wandb
+
+huggingface_hub

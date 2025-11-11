@@ -15,3 +15,11 @@ wandb/
 *.pth
 *.ckpt
 *.ipynb_checkpoints/
+
+# Gradio temporary files
+.gradio/
+gradio_cached_examples/
+flagged/
+
+# Temporary upload directories
+temp_hf_upload/
